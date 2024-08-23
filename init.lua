@@ -55,9 +55,8 @@ function obj:dict_set(dict, key, val)
   assert(type(dict) == "table", "Dictionary is invalid")
   assert(key ~= nil, "key to insert in dictionary is nil")
 
-  if not dict[key] then
-    dict[key] = val or true
-  end
+  dict[key] = val or true
+
   return dict
 end
 
@@ -323,18 +322,19 @@ function callback_window(win, appName, event)
   if event == "windowMoved" then
     print("#################################################event for window moved", win)
     print("hidden  ", obj:win_is_hidden(win))
-    print("current ", win:frame())
     print("saved   ", obj:win_dimensions_get(win))
+    print("current ", win:frame())
     if (not obj:window_ignore(win)) and not obj:win_is_hidden(win) then
       if obj:window_get_ws(win) ~= obj.currentWS then
         -- it is not where it is supposed to be, save new location
         print("  ------------ save new workspace")
-        obj:win_dimensions_save(win)
+        obj:window_set_ws(win, obj.currentWS)
       end
       print("  ------------ save new location")
-      obj:window_set_ws(win, obj.currentWS)
+      obj:win_dimensions_save(win)
       -- window was 
     end
+    print("saved2  ", obj:win_dimensions_get(win))
     print("#################################################")
 
     return
@@ -484,18 +484,15 @@ function obj:ws_goto(ws)
 
   for wid, wdata in pairs(wins) do
     local win = hs.window(wid)
-    local wws = wdata["ws"]
     if win and (not obj:window_ignore(win))  then --and obj:win_frame_in_screen(win)
+      print("Window:", wid, ws, hs.inspect(wdata))
+      local wws = wdata["ws"]
       if wws == ws then
   --      obj:debug_window(win, "+++++++in goto to restore: \n")
-        print("Window:", wid, vdata)
-        print("Window2:", win)
         print("\n\nTo restore")
         obj:restore(win)
       else
 --        obj:debug_window(win, "---------------++++in goto to hide: \n")
-        print("Window:", wid, vdata)
-        print("Window2:", win)
         print("\n\nTo hide")
         obj:hide(win)
       end
