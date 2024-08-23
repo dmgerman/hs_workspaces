@@ -17,6 +17,9 @@
 ** NEXT activate one of the windows in the space
 
 - i guess I have to check the stack and find the latest
+- find first window 
+
+** TODO the first space should not have ALL windows  
 
 ** TODO what about multiple screens?
 

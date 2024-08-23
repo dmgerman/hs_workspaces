@@ -118,11 +118,22 @@ function obj:window_is_everywhere(win)
   return obj:dict_in(obj.appsEverywhere, app:bundleID())
 end
 
+function obj:window_in_managed_screen(win)
+  assert(obj:is_window(win), "invalid window parameter ")
+  return win:screen() == hs.screen.primaryScreen()
+end
+
+function obj:window_is_managed(win)
+  assert(obj:is_window(win), "invalid window parameter ")
+  return obj:window_get_ws(win) ~= nil
+end
+
+
 function obj:window_ignore(win)
   -- ignorable windows 
   assert(obj:is_window(win), "invalid window parameter ")
 
-  return win:screen() ~= hs.screen.primaryScreen()
+  return (not obj:window_in_managed_screen(win))
     or win:isFullScreen()
     or win:isMinimized()
     or (not win:isMaximizable())
@@ -141,6 +152,11 @@ function obj:window_set_ws(win, ws)
   assert(obj:is_window(win), "invalid window parameter " )
   assert(obj:is_ws(ws), "invalid ws parameter")
   
+  if obj:window_get_ws(win) == ws then
+    -- already set, 
+    return 
+  end
+
   obj:dict_set(obj.wsWindows, win:id(),
     {["title"] = win:title(), ["ws"]= ws, ["app"] = win:application()}
   )
@@ -287,6 +303,8 @@ end
 function obj:manage_window(win)
   assert(obj:is_window(win), "invalid window parameter ")
 
+  assert(obj:window_get_ws(win) == nil, "Window to manage is already managed")
+
   if obj:window_ignore(win) then
     return 
   end
@@ -298,10 +316,39 @@ function obj:manage_window(win)
 end
 
 function obj:forget_window(win)
+  assert(obj:is_window(win), "invalid window parameter ")
   print("forget window: ", win, win:id())
   -- at this point, win might no longer be a win
-  obj:ws_remove_window(win)
-  obj:window_remove_ws(win)
+  if obj:window_is_managed(win) then
+    obj:ws_remove_window(win)
+    obj:window_remove_ws(win)
+  else
+    print("Window is not managed, but requested to unmanage", win)
+  end
+end
+
+function obj:window_in_current_ws(win)
+  assert(obj:is_window(win), "invalid window parameter ")
+  return obj:window_get_ws(win) ~= obj.currentWS 
+end
+
+function obj:update_window_position(win)
+  assert(obj:is_window(win), "invalid window parameter ")
+
+  if obj:window_ignore(win) then
+    -- don't do anything when window is ignored
+    return 
+  end
+
+  if obj:window_is_managed(win) then
+    if not obj:win_is_hidden(win) then
+      obj:window_set_ws(win, obj.currentWS)
+      obj:win_dimensions_save(win)
+    end
+  else
+      obj:manage_window(win)
+    end
+  end
 end
 
 
@@ -324,16 +371,15 @@ function callback_window(win, appName, event)
     print("hidden  ", obj:win_is_hidden(win))
     print("saved   ", obj:win_dimensions_get(win))
     print("current ", win:frame())
-    if (not obj:window_ignore(win)) and not obj:win_is_hidden(win) then
-      if obj:window_get_ws(win) ~= obj.currentWS then
-        -- it is not where it is supposed to be, save new location
-        print("  ------------ save new workspace")
-        obj:window_set_ws(win, obj.currentWS)
+
+    if not obj:window_ignore(win) then
+      if obj:window_in_managed_screen(win) then
+        obj:update_window_position(win)
+      else
+        obj:forget_window(win)
       end
-      print("  ------------ save new location")
-      obj:win_dimensions_save(win)
-      -- window was 
     end
+
     print("saved2  ", obj:win_dimensions_get(win))
     print("#################################################")
 
@@ -518,8 +564,15 @@ function obj:focused_window_to_ws(ws, go)
   end
 end
 
+function obj:table_len(T)
+  local count = 0
+  for _ in pairs(T) do count = count + 1 end
+  return count
+end
+
 function obj:ws_display()
-  hs.alert("Current workspace: " .. obj.currentWS)
+  local wins = obj:ws_get_windows(obj.currentWS) or {}
+  hs.alert(string.format("Current workspace: %s (%d windows)", obj.currentWS, obj:table_len(wins)))
 end
 
 --- some initialization
