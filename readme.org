@@ -1,0 +1,31 @@
+
+
+
+* Log [2024-08-21 Wed]
+
+- basic infrastructure to keep track of which worskpace a given
+  window is at
+
+- For every window we keep:
+  - if the window is everywhere
+  - if the window is hidden
+  - its workspace
+  - its frame when not hidden
+
+* TODOS    
+
+** TODO what about multiple screens?
+
+I guess at this point only deal with one screen.
+
+Windows are managed if they are in the main screen
+
+
+** TODO Hide windows not in workspace
+
+** TODO callback for focus
+
+- in that case, move the workspace where the window is and
+  move it back into place
+
+** TODO goto workspace
