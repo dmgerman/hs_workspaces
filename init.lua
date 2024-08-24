@@ -17,6 +17,7 @@ obj.defaultWspace = "1"
 obj.currentWS = obj.defaultWspace
 obj.winDims = {}
 obj.winHidden = {}
+obj.winSticky = {}
 -- implement some sets
 
 obj.storeAreaMargin_x = 10
@@ -90,7 +91,7 @@ obj.appsDefaultWspace = {
   ["com.bambulab.bambu-studio"] = "4"
 }
 
-obj.appsEverywhere = {
+obj.appsSticky = {
   ["com.apple.systempreferences"]=true,
   ["org.hammerspoon.Hammerspoon"]=true,
 }
@@ -107,15 +108,31 @@ function obj:debug_window(win, st)
   print("    in screen:", obj:win_frame_in_screen(win))
 end
 
-function obj:verity_state()
+function obj:window_get_sticky(win)
+  assert(obj:is_window(win), "invalid window parameter " )
+  return obj.winSticky[win:id()]
 end
 
-function obj:window_is_everywhere(win)
+function obj:window_set_sticky(win, st)
+  assert(obj:is_window(win), "invalid window parameter " )
+  assert(type(st)=="boolean", "invalid boolean value to stickyness")
+
+  if not st then
+    -- this will remove the entry
+    st = nil
+  end
+  obj.winSticky[win:id()] = nil
+  return win
+end
+
+function obj:window_is_sticky(win)
   assert(obj:is_window(win), "invalid window parameter ")
 
   assert(win ~= nil, "No window provided")
   local app = win:application()
-  return obj:dict_in(obj.appsEverywhere, app:bundleID())
+
+  return obj:dict_in(obj.appsSticky, app:bundleID()) 
+      or obj:window_get_sticky(win)
 end
 
 function obj:window_in_managed_screen(win)
@@ -137,15 +154,18 @@ function obj:window_ignore(win)
     or win:isFullScreen()
     or win:isMinimized()
     or (not win:isMaximizable())
-    or obj:window_is_everywhere(win) 
+    or obj:window_is_sticky(win) 
 end
 
 
 function obj:window_get_ws(win)
   assert(obj:is_window(win), "invalid window parameter " )
   result = obj:dict_get(obj.wsWindows, win:id())
-  assert(result, "Window_get_ws found no ws for win")
-  return result["ws"]
+  if result then
+    return result["ws"]
+  else
+    return nil
+  end
 end
 
 function obj:window_set_ws(win, ws)
@@ -158,7 +178,11 @@ function obj:window_set_ws(win, ws)
   end
 
   obj:dict_set(obj.wsWindows, win:id(),
-    {["title"] = win:title(), ["ws"]= ws, ["app"] = win:application()}
+    {["title"] = win:title(),
+      ["ws"]= ws,
+      ["app"] = win:application(),
+      ["sticky"] = false
+    }
   )
 end
 
@@ -306,13 +330,14 @@ function obj:manage_window(win)
   assert(obj:window_get_ws(win) == nil, "Window to manage is already managed")
 
   if obj:window_ignore(win) then
-    return 
+    return nil
   end
 
   local ws = obj:window_default_ws(win)
 
   obj:ws_insert_window(ws, win)
   obj:window_set_ws(win, ws)
+  return win
 end
 
 function obj:forget_window(win)
@@ -332,6 +357,13 @@ function obj:window_in_current_ws(win)
   return obj:window_get_ws(win) ~= obj.currentWS 
 end
 
+function obj:window_at_saved_position(win)
+  assert(obj:is_window(win), "invalid window parameter ")
+  assert(obj:window_is_managed(win))
+
+  return obj:win_dimensions_get(win) == win:frame()
+end
+
 function obj:update_window_position(win)
   assert(obj:is_window(win), "invalid window parameter ")
 
@@ -339,18 +371,21 @@ function obj:update_window_position(win)
     -- don't do anything when window is ignored
     return 
   end
+  if not obj:window_is_managed(win) then
+    obj:manage_window(win)
+    return
+  end
+  if obj:win_is_hidden(win) then
+    return
+  end
 
-  if obj:window_is_managed(win) then
-    if not obj:win_is_hidden(win) then
-      obj:window_set_ws(win, obj.currentWS)
-      obj:win_dimensions_save(win)
-    end
-  else
-      obj:manage_window(win)
-    end
+  if obj:window_get_ws(win) ~= obj.currentWS then
+    obj:window_set_ws(win, obj.currentWS)
+  end
+  if not obj:window_at_saved_position(win) then
+    obj:win_dimensions_save(win)
   end
 end
-
 
 function callback_window(win, appName, event)
 
@@ -362,7 +397,12 @@ function callback_window(win, appName, event)
    
   if event == "windowCreated" then
     print("Window created: ", win)
-    obj:manage_window(win)
+    if obj:window_is_managed(win) then
+      obj:update_window_position(win)
+    else
+      obj:manage_window(win)
+    end
+
     return 
   end
 
@@ -416,12 +456,16 @@ end
 
 function obj:win_filters_disable()
   print("                      -------- Filters disabled>>>")
-  obj.winFilter:pause()
+  if obj.winFilter then
+    obj.winFilter:pause()
+  end
 end
 
 function obj:win_filters_enable()
   print("                      -------- Filters enabled<<<<")
-  obj.winFilter:resume()
+  if obj.winFilter then
+    obj.winFilter:resume()
+  end
 end
 
 
@@ -431,14 +475,11 @@ end
 ---------------------------------------------------
 function obj:move_to_storage_area(win)
   assert(obj:is_window(win), "invalid parameter, should be a window")
-  print("***********************************************************")
   local winFr = win:frame()
-  print("WinFrame: ", hs.inspect(winFr))
+
   winFr.x = obj.storeArea.x
   winFr.y = obj.storeArea.y
   win:move(winFr)
-  print("WinFrame: ", hs.inspect(win:frame()))
-  print("***********************************************************")
 
   assert(obj:win_in_store_area(win), "Window did not move to storage area")
 end
@@ -484,16 +525,25 @@ function obj:restore(win)
   local frame = obj:win_dimensions_get(win)
 
   if not frame or obj:frame_in_store_area(frame) then
-    local fr = hs.screen.mainScreen():frame()
-    print("restoring to <0,0>", fr, fr.x, fr.y)
-    win:move({x=fr.x,y=fr.y})
+    obj:force_move_window_to_display(win)
   else
-    print("restoring to frame .....", frame)
     win:move(frame)
   end
-
   print("ENd>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>restoring, end", win)
 end
+
+function obj:force_move_window_to_display(win)
+  assert(obj:is_window(win), "invalid parameter, should be a window")
+  local frame = win:frame()
+  local dFr = hs.screen.mainScreen():frame()
+  print(hs.inspect(frame))
+  print(hs.inspect(dFr))
+  frame.x = dFr.x
+  frame.y = dFr.y
+  win:move(frame)
+  obj:win_dimensions_save(win)
+end
+
 
 function obj:hide_toggle(win)
   assert(obj:is_window(win), "invalid parameter, should be a window")
@@ -519,34 +569,45 @@ function obj:restore_all_windows()
 end
 
 function obj:ws_goto(ws)
-  assert(obj:is_ws(ws), "invalid name for workspace "..ws )
+  local bt = hs.timer.localTime() 
+  function delta()
+    return hs.timer.localTime()  - bt
+  end
+  print("Workspace to move to ", ws)
+  assert(obj:is_ws(ws), "invalid name for workspace ")
 
   print("Begin goto*******************************************----------------", ws)
   obj.currentWS = ws
 
+  print("Starting:", delta())
+
   obj:win_filters_disable()
+  print("Starting 1.5:", delta())
   local wins = obj:windows_get_all()
 --  print("Wins:", hs.inspect(wins))
-
+  print("Starting 2:", delta())
   for wid, wdata in pairs(wins) do
+    print("Starting 3:",delta())
     local win = hs.window(wid)
     if win and (not obj:window_ignore(win))  then --and obj:win_frame_in_screen(win)
-      print("Window:", wid, ws, hs.inspect(wdata))
+--      print("Window:", wid, ws, hs.inspect(wdata))
       local wws = wdata["ws"]
       if wws == ws then
   --      obj:debug_window(win, "+++++++in goto to restore: \n")
-        print("\n\nTo restore")
+--        print("\n\nTo restore")
         obj:restore(win)
       else
 --        obj:debug_window(win, "---------------++++in goto to hide: \n")
-        print("\n\nTo hide")
+--        print("\n\nTo hide")
         obj:hide(win)
       end
     end
   end
-
+  print("Starting 4:", delta())
+  obj:focus_window_in_current_ws()
   obj:win_filters_enable()
   obj:ws_display()
+  print("Starting 5:", delta())
   print("End goto *******************************************----------------", ws)
 end
 
@@ -575,29 +636,42 @@ function obj:ws_display()
   hs.alert(string.format("Current workspace: %s (%d windows)", obj.currentWS, obj:table_len(wins)))
 end
 
+function obj:focus_window_in_current_ws()
+  for i,win in ipairs(hs.window.allWindows()) do
+    if (not obj:window_ignore(win)) and obj:window_is_managed(win) then
+      if (obj:window_get_ws(win) == obj.currentWS) then
+        print("\n\n>>>>>>>>>>>>>>>>> window to focus", win)
+        win:focus()
+        return
+      end
+    end
+
+  end
+end
+
+
 --- some initialization
 
 obj:store_area_set()
 
-
 -- startup: give all current windows a workspace
 -- and move windows to where they belong
 
-for i,win in ipairs(hs.window.allWindows()) do
-  print("Window......... ", win)
-  local ws = obj:window_default_ws(win)
+print("current ws", obj.currentWS)
 
-  if obj:win_in_store_area(win) then
-    print("window was left in store area, moving back")
-    win:move({x=0, y=0})
-  else
-    print("window was not in store area")
-  end
-  obj:ws_insert_window(ws, win)
-  if ws ~= obj.currentWS then
-    obj:hide(win)
+for i,win in ipairs(hs.window.allWindows()) do
+  if obj:manage_window(win) then
+    print("managing window", win)
+    if obj:win_in_store_area(win) and obj:window_get_ws(win) == obj.currentWS then
+      print("window was left in store area, moving back****************")
+      obj:force_move_window_to_display(win)
+    else
+      print("window was not in store area")
+    end
   end
 end
+
+obj:ws_goto(obj.currentWS)
 
 -- set windows filter and its callback
 
