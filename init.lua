@@ -12,11 +12,9 @@ obj.homepage = "https://github.com/dmgerman/hs_select_window.spoon"
 obj.license = "MIT - https://opensource.org/licenses/MIT"
 
 obj.winFilter = nil
-obj.defaultWspace = "1"
 
-obj.currentWS = obj.defaultWspace
+obj.currentWS = nil
 obj.winDims = {}
-obj.winHidden = {}
 obj.winSticky = {}
 -- implement some sets
 
@@ -24,23 +22,33 @@ obj.storeAreaMargin_x = 10
 -- TODO: this has to be set to slightly larger than the size of the bar...
 obj.storeAreaMargin_y = 80
 
+obj.workspaces = {
+  "1",
+  "2",
+  "3",
+  "4",
+  "5",
+  "6"
+}
+
+obj.wsSpaces = {}
+obj.wsWindows = {}
+
+obj.appsDefaultWspace = {
+  ["org.gnu.Emacs"] = "3",
+  ["com.bambulab.bambu-studio"] = "4"
+}
+
+obj.appsSticky = {
+  ["com.apple.systempreferences"]=true,
+  ["org.hammerspoon.Hammerspoon"]=true,
+}
+
 obj.storeArea = nil
 
-function obj:store_area_set()
-  local fr = hs.screen.mainScreen():frame()
-  obj.storeArea = hs.geometry(fr.x2-obj.storeAreaMargin_x, fr.y2-obj.storeAreaMargin_y)
-end
+obj.menuBar = nil
 
-function obj:is_window(w)
-  -- must be number, and it should return valid window
-  --  return type(w) == "number" and hs.window.get(w)
-  return type(w) == "userdata" and w.application
-end
-
-function obj:is_ws(ws)
-  return type(ws)== "string" and string.len(ws) > 0
-end
-
+------------------------------------------------
 
 function obj:dict_new(t)
   local dict = {}
@@ -55,6 +63,7 @@ function obj:dict_set(dict, key, val)
 
   assert(type(dict) == "table", "Dictionary is invalid")
   assert(key ~= nil, "key to insert in dictionary is nil")
+  assert(val ~= nil, "use dict_remove, not dict_set, not set", hs.inspect(val))
 
   dict[key] = val or true
 
@@ -82,35 +91,199 @@ function obj:dict_in(dict, key)
 end
 
 
+function obj:window_default_ws(win)
+  assert(obj:is_window(win), "invalid window parameter ")
+  return obj:dict_get(obj.appsDefaultWspace, win:application():bundleID()) or
+    obj.currentWS
+end
 
-obj.wsSpaces = {}
-obj.wsWindows = {}
+-------------------------------------------------------------
 
-obj.appsDefaultWspace = {
-  ["org.gnu.Emacs"] = "3",
-  ["com.bambulab.bambu-studio"] = "4"
-}
+function obj:ws_len()
+  -- return index of workspace
+  return #(obj.workspaces)
+end
 
-obj.appsSticky = {
-  ["com.apple.systempreferences"]=true,
-  ["org.hammerspoon.Hammerspoon"]=true,
-}
+function obj:default_workspace()
+  assert(obj.ws_len() > 0, "workspaces is empty")
 
-obj.wspaces = {}
+  return obj.workspaces[1]
+end
+
+
+function obj:ws_index(ws)
+  -- return index of workspace
+  assert(obj:is_ws(ws), "invalid name for workspace "..ws )
+  assert(obj.ws_len() > 0, "workspaces is empty")
+
+  for i,v in ipairs(obj.workspaces) do
+    if v == ws then
+      return i
+    end
+  end
+  return nil
+end
+
+
+function obj:ws_next(ws)
+  assert(#(obj.workspaces) > 0, "workspaces is empty")
+  local i = ws_index(ws)
+  assert(i>0, "worskpace does not exist")
+  
+  return (i+1)%(obj.ws_len)
+end
+
+function obj:ws_prev(ws)
+  assert(#(obj.workspaces) > 0, "workspaces is empty")
+  local i = ws_index(ws)
+  assert(i>0, "worskpace does not exist")
+  
+  return (i-1)%(obj.ws_len)
+end
+
+function obj:menuBar_update()
+
+  assert(obj.menuBar, "menubar not created yet")
+
+  obj.menuBar:setTitle(obj.currentWS)
+
+--  print("------------------->>>>>>>>>>>>>>>>>>>>>>>>>")
+--  print(hs.inspect(obj.wsSpaces))
+--  print("------------------->>>>>>>>>>>>>>>>>>>>>>>>>")
+
+  local items = {}
+  for _, ws in ipairs(obj.workspaces) do
+    local wsTable = obj:ws_get_windows_table(ws)
+    local size = (wsTable and obj:table_len(wsTable)) or 0
+
+    table.insert(items, {title = string.format("%s (%d)", ws, size),
+        fn = function() obj:ws_goto(ws) end})
+    if size > 0 then
+      for wid, _ in pairs(wsTable) do
+        local win = hs.window(wid)
+        if win then
+          table.insert(items, {title = string.format("   %s:%s", win:title(), win:application():name()),
+              fn = function()
+                obj:ws_goto(ws)
+                win:focus()
+          end})
+        else
+          print("did not really exist", wid, hs.inspect(wsTable))
+        end
+      end
+    end
+  end
+  table.insert(items, {title = "Sticky windows"})
+  for i,win in ipairs(hs.window.orderedWindows()) do
+    if not obj:window_is_managed(win) and
+      obj:window_in_managed_screen(win) and
+      win:isStandard()
+    then
+--      print("*******************************************************************", hs.inspect(win))
+--      print("Display: ", win:screen(), hs.screen.primaryScreen())
+--      print("frame: ", hs.inspect(win:frame()))
+--      print("Stadnard", win:isStandard())
+      table.insert(items, {title = string.format("   %s:%s", win:title(), win:application():name()),
+          fn = function()
+            win:focus()
+      end})
+    end
+  end
+
+  obj.menuBar:setMenu(items)
+end
+
+
+function obj:menuBar_init()
+  obj.menuBar = hs.menubar.new(true)
+  obj:menuBar_update()
+end
+
+function obj:store_area_set()
+  local fr = hs.screen.primaryScreen():frame()
+  obj.storeArea = hs.geometry(fr.x2-obj.storeAreaMargin_x, fr.y2-obj.storeAreaMargin_y)
+end
+
+function obj:is_window(w)
+  -- must be number, and it should return valid window
+  --  return type(w) == "number" and hs.window.get(w)
+  return type(w) == "userdata" and w.application
+end
+
+function obj:is_ws(ws)
+  return type(ws)== "string" and string.len(ws) > 0
+end
+
+
+
 
 function obj:debug_window(win, st)
-  print(st)
   assert(obj:is_window(win), "invalid window parameter ")
+  if st then
+    print("\n")
+    print(st)
+  end
   print("Window: ", win)
+  print("      Managed:", obj:window_is_managed(win))
+  print("   App:       ", win:application():bundleID())
+  print("    screen    ", obj:window_in_managed_screen(win))
+  print("cur screen    ", win:screen())
   print("    ws:       ", obj:window_get_ws(win))
   print("    hidden:   ", obj:win_is_hidden(win))
   print("    fr:       ", obj:win_dimensions_get(win))
-  print("    in screen:", obj:win_frame_in_screen(win))
+  print(" curfr:       ", win:frame())
+  print("    in screen:", obj:win_in_screen(win))
+  print("")
+end
+
+function obj:debug_wid(wid, st)
+  print(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>", hs.inspect(wid), type(wid))
+  assert(type(wid) == "number", "invalid wid parameter ")
+  if st then
+    print("\n")
+    print(st)
+  end
+  win = hs.window(wid)
+  print("Window id: ", wid, win)
+  if win then
+    obj:debug_window(win)
+  else
+    print("        Window no longer exists")
+    print(hs.inspect( obj:dict_get(obj.wsWindows, wid)))
+    print("")
+  end
+end
+
+
+
+function obj:debug_windows(st)
+  print("\n")
+  print(st)
+  for wid,v in pairs(obj.wsWindows) do
+    win = hs.window(wid)
+    print(win, hs.inspect(v))
+    if win then
+      obj:debug_window(win,nil)
+    else
+      print("LLLLLLLLLLLLLLLL window does not exist")
+      obj:debug_wid(wid, nil)
+    end
+  end
 end
 
 function obj:window_get_sticky(win)
   assert(obj:is_window(win), "invalid window parameter " )
   return obj.winSticky[win:id()]
+end
+
+function obj:window_is_sticky(win)
+  assert(obj:is_window(win), "invalid window parameter ")
+
+  assert(win ~= nil, "No window provided")
+  local app = win:application()
+
+  return obj:dict_in(obj.appsSticky, app:bundleID()) 
+    or obj:window_get_sticky(win)
 end
 
 function obj:window_set_sticky(win, st)
@@ -123,16 +296,6 @@ function obj:window_set_sticky(win, st)
   end
   obj.winSticky[win:id()] = nil
   return win
-end
-
-function obj:window_is_sticky(win)
-  assert(obj:is_window(win), "invalid window parameter ")
-
-  assert(win ~= nil, "No window provided")
-  local app = win:application()
-
-  return obj:dict_in(obj.appsSticky, app:bundleID()) 
-      or obj:window_get_sticky(win)
 end
 
 function obj:window_in_managed_screen(win)
@@ -160,7 +323,7 @@ end
 
 function obj:window_get_ws(win)
   assert(obj:is_window(win), "invalid window parameter " )
-  result = obj:dict_get(obj.wsWindows, win:id())
+  local result = obj:dict_get(obj.wsWindows, win:id())
   if result then
     return result["ws"]
   else
@@ -189,12 +352,15 @@ end
 function obj:window_remove_ws(win)
   assert(obj:is_window(win), "invalid window parameter " )
     
-  obj:dict_set(obj.wsWindows, win:id(), nil)
+  obj:dict_remove(obj.wsWindows, win:id())
 end
 
 
-function obj:ws_get_windows(ws)
+function obj:ws_get_windows_table(ws)
   assert(obj:is_ws(ws), "invalid name for workspace "..ws )
+
+--  print("ws:", ws)
+--  print("    ", hs.inspect(obj.wsSpaces))
 
   return obj:dict_get(obj.wsSpaces, ws)
 end
@@ -203,11 +369,11 @@ function obj:ws_add_window(ws, win)
   assert(obj:is_ws(ws), "invalid name for workspace "..ws )
   assert(obj:is_window(win), "invalid window parameter " )
 
-  local wsDict = obj:dict_get(obj.wsSpaces, ws)
+  local wsDict = obj:ws_get_windows_table(ws)
 
   if not wsDict then
     wsDict = {}
-    obj:dict_set(obj.wsSpaces, ws, wsDict)
+    obj:dict_set(obj.wsSpaces, ws, wsDict) 
   end
 
   assert(wsDict)
@@ -219,14 +385,15 @@ end
 function obj:ws_remove_window(win)
   -- find the ws of the window
   assert(obj:is_window(win), "invalid window parameter ")
-
   -- remove from spaces
-  local ws = obj:dict_get(obj.wsSpaces, win:id())
-  local wsDict = ws and obj:dict_get(obj.wsSpaces, ws)
+  
+  local ws = obj:window_get_ws(win)
+  assert(ws, "no workspace found for this window, it was not managed" .. hs.inspect(win))
 
+  local wsDict = ws and obj:ws_get_windows_table(ws)
   -- remove from workspace
   if wsDict then
-    obj:dict_remove(wsDict, win)
+    obj:dict_remove(wsDict, win:id())
   end
 end
 
@@ -267,14 +434,30 @@ function obj:win_in_screen(win)
   return result
 end
 
-function obj:win_dimensions_save(win)
+function obj:win_dimensions_unset(win)
   assert(obj:is_window(win), "invalid parameter, should be a window")
 
-  local fr = win:frame()
+  obj:dict_remove(obj.winDims, win:id())
+end
 
---  assert(obj:win_frame_in_screen(win), "window not in main screen")
+function obj:win_dimensions_save(win)
+  assert(obj:is_window(win), "invalid parameter, should be a window")
+  
+  obj:debug_window(win, "  >> save dimensions ")
 
-  obj:dict_set(obj.winDims, win:id(), fr)
+  local fr = nil
+  if not obj:win_in_store_area(win) then
+    fr = win:frame()
+  end
+
+  if fr then
+    obj:dict_set(obj.winDims, win:id(), fr)
+  else
+    obj:dict_remove(obj.winDims, win:id())
+  end
+
+  obj:debug_window(win, "  << save dimensions ")
+  return fr
 end
 
 function obj:win_dimensions_get(win)
@@ -290,7 +473,7 @@ end
 
 function obj:ws_insert_window(ws, win)
   -- we need to insert it in the windows  and into the workspace
-  assert(obj:is_ws(ws), "invalid name for workspace "..ws )
+  assert(obj:is_ws(ws),      "invalid name for workspace " .. hs.inspect(ws) )
   assert(obj:is_window(win), "invalid window parameter " )
 
   obj:ws_add_window(ws, win)
@@ -302,10 +485,12 @@ function obj:window_move_to_ws(win, ws)
   assert(obj:is_window(win), "invalid window parameter ")
 
   if obj:window_ignore(win) then
+    hs.alert("Request to move window ignored")
     return win
   end
   if obj:window_get_ws(win) == ws then
     -- already in current space
+    hs.alert("Window already in destination workspace")
     return win
   end
 
@@ -318,25 +503,23 @@ function obj:window_move_to_ws(win, ws)
   return win
 end
 
-function obj:window_default_ws(win)
-  assert(obj:is_window(win), "invalid window parameter ")
-  return obj:dict_get(obj.appsDefaultWspace, win:application():bundleID()) or
-    obj.currentWS
-end
 
-function obj:manage_window(win)
+function obj:manage_window(win, pws)
   assert(obj:is_window(win), "invalid window parameter ")
-
   assert(obj:window_get_ws(win) == nil, "Window to manage is already managed")
+
 
   if obj:window_ignore(win) then
     return nil
   end
 
-  local ws = obj:window_default_ws(win)
+  local defWS =  obj:window_default_ws(win) 
+
+  local ws = pws or defWS or obj.currentWS
 
   obj:ws_insert_window(ws, win)
   obj:window_set_ws(win, ws)
+  obj:menuBar_update()
   return win
 end
 
@@ -350,6 +533,8 @@ function obj:forget_window(win)
   else
     print("Window is not managed, but requested to unmanage", win)
   end
+  obj:debug_window(win, "\n\n                FORGOT window    ")
+  obj:menuBar_update()
 end
 
 function obj:window_in_current_ws(win)
@@ -372,6 +557,7 @@ function obj:update_window_position(win)
     return 
   end
   if not obj:window_is_managed(win) then
+    print("Window was not managed. start managing")
     obj:manage_window(win)
     return
   end
@@ -382,47 +568,56 @@ function obj:update_window_position(win)
   if obj:window_get_ws(win) ~= obj.currentWS then
     obj:window_set_ws(win, obj.currentWS)
   end
-  if not obj:window_at_saved_position(win) then
-    obj:win_dimensions_save(win)
+  obj:win_dimensions_unset(win)
+  obj:debug_window(win, "Window was position updated")
+  obj:menuBar_update()
+end
+
+function obj:callback_do_window_move(win)
+  if obj:window_in_managed_screen(win) then
+    if not obj:window_ignore(win) then
+
+      if not obj:window_is_managed(win) then
+        obj:manage_window(win)
+      else
+        obj:update_window_position(win)
+      end
+      obj:menuBar_update()
+    end
+  elseif obj:window_is_managed(win) then
+    obj:forget_window(win)
   end
 end
 
+
 function callback_window(win, appName, event)
+  print(string.format("WS EVENT >>>>>>>>>>>>>>>>>>> [%s]", event))
 
   if event == "windowDestroyed" then
-    print("Window destroyed: ", win)
-    obj:forget_window(win)
+    if obj:window_in_managed_screen(win) then
+      obj:forget_window(win)
+      obj:menuBar_update()
+    end
     return
   end
    
   if event == "windowCreated" then
-    print("Window created: ", win)
-    if obj:window_is_managed(win) then
-      obj:update_window_position(win)
-    else
-      obj:manage_window(win)
+
+    if obj:window_in_managed_screen(win) then
+      if obj:window_is_managed(win) then
+        obj:update_window_position(win)
+      else
+        obj:manage_window(win)
+      end
+      obj:menuBar_update()
     end
 
     return 
   end
 
   if event == "windowMoved" then
-    print("#################################################event for window moved", win)
-    print("hidden  ", obj:win_is_hidden(win))
-    print("saved   ", obj:win_dimensions_get(win))
-    print("current ", win:frame())
 
-    if not obj:window_ignore(win) then
-      if obj:window_in_managed_screen(win) then
-        obj:update_window_position(win)
-      else
-        obj:forget_window(win)
-      end
-    end
-
-    print("saved2  ", obj:win_dimensions_get(win))
-    print("#################################################")
-
+    obj:callback_do_window_move(win)
     return
 
 --    if not obj:window_ignore(win) then
@@ -448,9 +643,10 @@ function callback_window(win, appName, event)
       local ws = obj:window_get_ws(win) or obj.currentWS
       obj:ws_goto(ws)
     end
+    obj:menuBar_update()
     return 
   end
-  print("event not handled>>>>>>>>>>>>>>>>>>>>", event)
+  print("EVENT NOT HANDLED>>>>>>>>>>>>>>>>>>>>", event)
 
 end
 
@@ -475,10 +671,14 @@ end
 ---------------------------------------------------
 function obj:move_to_storage_area(win)
   assert(obj:is_window(win), "invalid parameter, should be a window")
-  local winFr = win:frame()
+  assert(not obj:win_is_hidden(win), "window is already in storage!!")
+
+  -- remember, lua returns references
+  local winFr = hs.geometry.copy(obj:win_dimensions_save(win))
 
   winFr.x = obj.storeArea.x
   winFr.y = obj.storeArea.y
+
   win:move(winFr)
 
   assert(obj:win_in_store_area(win), "Window did not move to storage area")
@@ -499,8 +699,6 @@ function obj:hide(win)
     print("window is already hidden")
     return
   end
-  obj:win_dimensions_save(win)
---  local screenFr = hs.screen.mainScreen():frame()
   
   obj:move_to_storage_area(win)
 
@@ -508,8 +706,13 @@ function obj:hide(win)
 end
 
 function obj:restore(win)
-  print(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>restoring", win)
+  print("       RESTORE       >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>restoring", win)
   assert(obj:is_window(win), "invalid parameter, should be a window")
+
+  -- this restores a window
+
+  -- this function is only responsible for restoring it, not
+  -- window must be hidden before this function is called
 
   if obj:window_ignore(win) then
     print("ENd>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>restoring, ignore", win)
@@ -522,28 +725,26 @@ function obj:restore(win)
     return
   end
 
-  local frame = obj:win_dimensions_get(win)
+  local frame = obj:win_dimensions_get(win) or obj:window_frame_to_primary_display(win)
 
-  if not frame or obj:frame_in_store_area(frame) then
-    obj:force_move_window_to_display(win)
-  else
-    win:move(frame)
-  end
-  print("ENd>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>restoring, end", win)
+  assert(frame)
+  win:move(frame)
+
+  obj:win_dimensions_unset(win)
+  print("         RESTORE            ENd>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>restoring, end", win)
 end
 
-function obj:force_move_window_to_display(win)
+
+function obj:window_frame_to_primary_display(win)
   assert(obj:is_window(win), "invalid parameter, should be a window")
-  local frame = win:frame()
-  local dFr = hs.screen.mainScreen():frame()
-  print(hs.inspect(frame))
-  print(hs.inspect(dFr))
+
+  -- remember, lua returns references
+  local frame = hs.geometry.copy(win:frame())
+  local dFr = hs.screen.primaryScreen():frame()
   frame.x = dFr.x
   frame.y = dFr.y
-  win:move(frame)
-  obj:win_dimensions_save(win)
+  return frame
 end
-
 
 function obj:hide_toggle(win)
   assert(obj:is_window(win), "invalid parameter, should be a window")
@@ -569,6 +770,11 @@ function obj:restore_all_windows()
 end
 
 function obj:ws_goto(ws)
+
+  if ws == obj.currentWS then
+    return
+  end
+
   local bt = hs.timer.localTime() 
   function delta()
     return hs.timer.localTime()  - bt
@@ -606,6 +812,7 @@ function obj:ws_goto(ws)
   print("Starting 4:", delta())
   obj:focus_window_in_current_ws()
   obj:win_filters_enable()
+  obj:menuBar_update()
   obj:ws_display()
   print("Starting 5:", delta())
   print("End goto *******************************************----------------", ws)
@@ -632,12 +839,12 @@ function obj:table_len(T)
 end
 
 function obj:ws_display()
-  local wins = obj:ws_get_windows(obj.currentWS) or {}
+  local wins = obj:ws_get_windows_table(obj.currentWS) or {}
   hs.alert(string.format("Current workspace: %s (%d windows)", obj.currentWS, obj:table_len(wins)))
 end
 
 function obj:focus_window_in_current_ws()
-  for i,win in ipairs(hs.window.allWindows()) do
+  for i,win in ipairs(hs.window.orderedWindows()) do
     if (not obj:window_ignore(win)) and obj:window_is_managed(win) then
       if (obj:window_get_ws(win) == obj.currentWS) then
         print("\n\n>>>>>>>>>>>>>>>>> window to focus", win)
@@ -645,43 +852,42 @@ function obj:focus_window_in_current_ws()
         return
       end
     end
-
   end
 end
 
+function obj:initialize()
+  --- some initialization
+  local cWin = hs.window.focusedWindow()
 
---- some initialization
+  obj.currentWS = obj.default_workspace()
+  obj:menuBar_init()
+  obj:store_area_set()
 
-obj:store_area_set()
+  -- startup: give all current windows a workspace
+  -- and move windows to where they belong
 
--- startup: give all current windows a workspace
--- and move windows to where they belong
-
-print("current ws", obj.currentWS)
-
-for i,win in ipairs(hs.window.allWindows()) do
-  if obj:manage_window(win) then
-    print("managing window", win)
-    if obj:win_in_store_area(win) and obj:window_get_ws(win) == obj.currentWS then
-      print("window was left in store area, moving back****************")
-      obj:force_move_window_to_display(win)
-    else
-      print("window was not in store area")
-    end
+  for i,win in ipairs(hs.window.allWindows()) do
+    obj:manage_window(win)
   end
+
+  local destionWs = (cWin and obj:window_is_managed(cWin) and obj:window_get_ws(cWin)) or
+    obj.currentWs
+  
+  obj:ws_goto(destionWs)
+
+  -- set windows filter and its callback
+
+  obj.winFilter = hs.window.filter.new()
+  obj.winFilter:setDefaultFilter{}
+  obj.winFilter:subscribe(hs.window.filter.windowCreated, callback_window)
+  obj.winFilter:subscribe(hs.window.filter.windowDestroyed, callback_window)
+  obj.winFilter:subscribe(hs.window.filter.windowFocused, callback_window)
+  obj.winFilter:subscribe(hs.window.filter.windowMoved, callback_window)
+  --obj.winFilter:subscribe(hs.window.filter.windowMoved, callback_window_move)
+
 end
 
-obj:ws_goto(obj.currentWS)
-
--- set windows filter and its callback
-
-obj.winFilter = hs.window.filter.new()
-obj.winFilter:setDefaultFilter{}
-obj.winFilter:subscribe(hs.window.filter.windowCreated, callback_window)
-obj.winFilter:subscribe(hs.window.filter.windowDestroyed, callback_window)
-obj.winFilter:subscribe(hs.window.filter.windowFocused, callback_window)
-obj.winFilter:subscribe(hs.window.filter.windowMoved, callback_window)
---obj.winFilter:subscribe(hs.window.filter.windowMoved, callback_window_move)
+obj:initialize()
 
 
 hs.hotkey.bind({"alt"}, "1",    function () obj:ws_goto("1") end)

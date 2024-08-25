@@ -1,7 +1,23 @@
+:PROPERTIES:
+:ID:       id-20240825-160049
+:TRIGGER:  org-gtd-next-project-action org-gtd-update-project-task!
+:END:
+
+* Log
+
+** [2024-08-25 Sun]
+
+- lots of improvements and clean up of the code
+
+- hs_workspaces:
+  - only manages primary screen
+  - only manages non-sticky windows    
+  - only keeps the minimal info:
+    - it only tracks info of windows in workspaces
+    - a window is hidden if it is in the storage area
 
 
-
-* Log [2024-08-21 Wed]
+** [2024-08-21 Wed]
 
 - basic infrastructure to keep track of which worskpace a given
   window is at
@@ -12,27 +28,63 @@
   - its workspace
   - its frame when not hidden
 
+
+
+
 * TODOS    
 
-** NEXT activate one of the windows in the space
+** DONE activate one of the windows in the space
+CLOSED: [2024-08-24 Sat 11:21]
 
 - i guess I have to check the stack and find the latest
-- find first window 
+- find first window
 
-** TODO the first space should not have ALL windows  
-
-** TODO what about multiple screens?
+** CANCELLED what about multiple screens?
+CLOSED: [2024-08-24 Sat 11:21]
 
 I guess at this point only deal with one screen.
 
 Windows are managed if they are in the main screen
 
+No, too problematic to support now, and the biggest benefit will always be in laptops
 
-** TODO Hide windows not in workspace
+** DONE Hide windows not in workspace
+CLOSED: [2024-08-24 Sat 11:21]
 
-** TODO callback for focus
+** DONE callback for focus
+CLOSED: [2024-08-24 Sat 11:22]
 
 - in that case, move the workspace where the window is and
   move it back into place
 
-** TODO goto workspace
+** DONE goto workspace
+CLOSED: [2024-08-24 Sat 11:22]
+
+** DONE the menu bar seems to be a bit buggy                            :bug:
+CLOSED: [2024-08-25 Sun 15:57]
+
+
+** DONE ignored windows and menu bar:
+CLOSED: [2024-08-25 Sun 15:57]
+
+- they need their special place
+
+** NEXT support prev/next ws
+
+- moving windows 
+- moving to ws
+
+** DONE when switching ws the number of windows is incorrect            :bug:
+CLOSED: [2024-08-25 Sun 15:57]
+
+** DONE when moving a window outside screen                             :bug:
+CLOSED: [2024-08-25 Sun 15:57]
+
+- the window should become unmanaged
+
+** DONE moving window within screen                                     :bug:
+CLOSED: [2024-08-25 Sun 15:57]
+
+- the fr should be nil unless moved to storage
+
+
