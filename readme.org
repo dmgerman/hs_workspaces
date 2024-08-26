@@ -74,6 +74,17 @@ CLOSED: [2024-08-25 Sun 15:57]
 - moving windows 
 - moving to ws
 
+** TODO check what happens when display turns off
+
+** TODO check what happens when sleep/resume?
+
+** CANCELLED hs.alert should use the primaryScreen
+CLOSED: [2024-08-25 Sun 18:46]
+
+no, keep it where it is
+
+
+
 ** DONE when switching ws the number of windows is incorrect            :bug:
 CLOSED: [2024-08-25 Sun 15:57]
 

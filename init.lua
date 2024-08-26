@@ -223,7 +223,8 @@ function obj:debug_window(win, st)
     print("\n")
     print(st)
   end
-  print("Window: ", win)
+  print("Window: ", hs.inspect(win))
+  print("    id:       ", win:id())
   print("      Managed:", obj:window_is_managed(win))
   print("   App:       ", win:application():bundleID())
   print("    screen    ", obj:window_in_managed_screen(win))
@@ -871,7 +872,7 @@ function obj:initialize()
   end
 
   local destionWs = (cWin and obj:window_is_managed(cWin) and obj:window_get_ws(cWin)) or
-    obj.currentWs
+    obj.currentWS
   
   obj:ws_goto(destionWs)
 
